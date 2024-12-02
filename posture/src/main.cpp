@@ -1,205 +1,220 @@
 #include <Arduino.h>
 #include <Wire.h>
+#include <math.h>
 
-// IMU Addresses
-const int MPU9250_ADDRESS_1 = 0x68;
-const int MPU9250_ADDRESS_2 = 0x69;
-const int sda = 21;
-const int scl = 22;
+// MPU9250 I2C Addresses
+const int MPU9250_ADDRESS_1 = 0x68; // Sensor 1 (AD0 = GND)
+const int MPU9250_ADDRESS_2 = 0x69; // Sensor 2 (AD0 = VCC)
 
-// Sensor variables
-int16_t accelX_1, accelY_1, accelZ_1;
-int16_t gyroX_1, gyroY_1, gyroZ_1;
-int16_t accelX_2, accelY_2, accelZ_2;
-int16_t gyroX_2, gyroY_2, gyroZ_2;
+// I2C Pins
+const int SDA_PIN = 21;
+const int SCL_PIN = 22;
 
-// Madgwick filter variables
-float beta = 0.1f;    // Filter gain
-float sampleFreq = 100.0f; // Sample frequency in Hz
-float deltaT = 1.0f / sampleFreq;
+// Register Addresses
+const uint8_t PWR_MGMT_1 = 0x6B;
+const uint8_t GYRO_CONFIG = 0x1B;
+const uint8_t ACCEL_CONFIG = 0x1C;
+const uint8_t ACCEL_XOUT_H = 0x3B;
+const uint8_t GYRO_XOUT_H = 0x43;
 
-// Quaternions for each sensor
+// Sensor Scale Factors
+const float GYRO_SCALE = 1.0f / 131.0f;    // ±250 deg/s
+const float ACCEL_SCALE = 1.0f / 16384.0f; // ±2g
+
+// Calibration Offsets
+float accelOffsetX_1 = 0, accelOffsetY_1 = 0, accelOffsetZ_1 = 0;
+float gyroOffsetX_1 = 0, gyroOffsetY_1 = 0, gyroOffsetZ_1 = 0;
+float accelOffsetX_2 = 0, accelOffsetY_2 = 0, accelOffsetZ_2 = 0;
+float gyroOffsetX_2 = 0, gyroOffsetY_2 = 0, gyroOffsetZ_2 = 0;
+
+// Quaternion Variables
 float q0_1 = 1.0f, q1_1 = 0.0f, q2_1 = 0.0f, q3_1 = 0.0f; // Sensor 1
 float q0_2 = 1.0f, q1_2 = 0.0f, q2_2 = 0.0f, q3_2 = 0.0f; // Sensor 2
 
-// Function prototypes
-void initMPU9250(int address);
-void readSensorData(int address, int16_t &accelX, int16_t &accelY, int16_t &accelZ, 
-                    int16_t &gyroX, int16_t &gyroY, int16_t &gyroZ);
+// Filter Parameters
+const float beta = 0.1f; // Madgwick filter gain
+const float sampleFreq = 100.0f; // Sampling frequency in Hz
+
+// Function Prototypes
+void initializeMPU9250(uint8_t address);
+void calibrateMPU9250(uint8_t address, float &accelOffsetX, float &accelOffsetY, float &accelOffsetZ,
+                      float &gyroOffsetX, float &gyroOffsetY, float &gyroOffsetZ);
+void readMPU9250(uint8_t address, int16_t &accelX, int16_t &accelY, int16_t &accelZ,
+                 int16_t &gyroX, int16_t &gyroY, int16_t &gyroZ);
 void madgwickUpdate(float gx, float gy, float gz, float ax, float ay, float az,
                     float &q0, float &q1, float &q2, float &q3);
 
 void setup() {
-  Wire.begin(sda, scl);
+  // Initialize Serial Monitor
   Serial.begin(115200);
-  
-  // Initialize both sensors
-  initMPU9250(MPU9250_ADDRESS_1);
-  initMPU9250(MPU9250_ADDRESS_2);
+  while (!Serial) {
+    ; // Wait for Serial to be ready
+  }
+
+  // Initialize I2C Communication
+  Wire.begin(SDA_PIN, SCL_PIN);
+  Wire.setClock(400000); // Fast I2C communication
+
+  // Initialize MPU9250 Sensors
+  initializeMPU9250(MPU9250_ADDRESS_1);
+  initializeMPU9250(MPU9250_ADDRESS_2);
+
+  // Calibrate Sensors
+  Serial.println("Calibrating sensors, please wait...");
+  calibrateMPU9250(MPU9250_ADDRESS_1, accelOffsetX_1, accelOffsetY_1, accelOffsetZ_1,
+                   gyroOffsetX_1, gyroOffsetY_1, gyroOffsetZ_1);
+  calibrateMPU9250(MPU9250_ADDRESS_2, accelOffsetX_2, accelOffsetY_2, accelOffsetZ_2,
+                   gyroOffsetX_2, gyroOffsetY_2, gyroOffsetZ_2);
+  Serial.println("Calibration complete!");
 }
 
 void loop() {
-  // Read data from both sensors
-  readSensorData(MPU9250_ADDRESS_1, accelX_1, accelY_1, accelZ_1, gyroX_1, gyroY_1, gyroZ_1);
-  readSensorData(MPU9250_ADDRESS_2, accelX_2, accelY_2, accelZ_2, gyroX_2, gyroY_2, gyroZ_2);
-  
-  // Convert to real values (adjust these based on your sensor's full-scale settings)
-  float gyroScale = 1.0f / 131.0f; // For ±250 deg/s
-  float accelScale = 1.0f / 16384.0f; // For ±2g
+  // Variables to hold raw sensor data
+  int16_t accelX, accelY, accelZ, gyroX, gyroY, gyroZ;
 
-  // Process sensor 1 data
-  float gx1 = gyroX_1 * gyroScale;
-  float gy1 = gyroY_1 * gyroScale;
-  float gz1 = gyroZ_1 * gyroScale;
-  float ax1 = accelX_1 * accelScale;
-  float ay1 = accelY_1 * accelScale;
-  float az1 = accelZ_1 * accelScale;
-  
-  // Process sensor 2 data
-  float gx2 = gyroX_2 * gyroScale;
-  float gy2 = gyroY_2 * gyroScale;
-  float gz2 = gyroZ_2 * gyroScale;
-  float ax2 = accelX_2 * accelScale;
-  float ay2 = accelY_2 * accelScale;
-  float az2 = accelZ_2 * accelScale;
+  // Read Sensor 1 Data
+  readMPU9250(MPU9250_ADDRESS_1, accelX, accelY, accelZ, gyroX, gyroY, gyroZ);
+  float ax1 = accelX * ACCEL_SCALE - accelOffsetX_1;
+  float ay1 = accelY * ACCEL_SCALE - accelOffsetY_1;
+  float az1 = accelZ * ACCEL_SCALE - accelOffsetZ_1;
+  float gx1 = gyroX * GYRO_SCALE - gyroOffsetX_1;
+  float gy1 = gyroY * GYRO_SCALE - gyroOffsetY_1;
+  float gz1 = gyroZ * GYRO_SCALE - gyroOffsetZ_1;
 
-  // Update orientation estimates using Madgwick filter
   madgwickUpdate(gx1, gy1, gz1, ax1, ay1, az1, q0_1, q1_1, q2_1, q3_1);
+
+  // Read Sensor 2 Data
+  readMPU9250(MPU9250_ADDRESS_2, accelX, accelY, accelZ, gyroX, gyroY, gyroZ);
+  float ax2 = accelX * ACCEL_SCALE - accelOffsetX_2;
+  float ay2 = accelY * ACCEL_SCALE - accelOffsetY_2;
+  float az2 = accelZ * ACCEL_SCALE - accelOffsetZ_2;
+  float gx2 = gyroX * GYRO_SCALE - gyroOffsetX_2;
+  float gy2 = gyroY * GYRO_SCALE - gyroOffsetY_2;
+  float gz2 = gyroZ * GYRO_SCALE - gyroOffsetZ_2;
+
   madgwickUpdate(gx2, gy2, gz2, ax2, ay2, az2, q0_2, q1_2, q2_2, q3_2);
 
-  // Print quaternions with 6 decimal places for precision
-  Serial.print("S1,");
-  Serial.print(q0_1, 6); Serial.print(",");
-  Serial.print(q1_1, 6); Serial.print(",");
-  Serial.print(q2_1, 6); Serial.print(",");
-  Serial.print(q3_1, 6); Serial.print(",");
-  
-  Serial.print("S2,");
-  Serial.print(q0_2, 6); Serial.print(",");
-  Serial.print(q1_2, 6); Serial.print(",");
-  Serial.print(q2_2, 6); Serial.print(",");
+  // Print Quaternion Data
+  Serial.print("Sensor 1 Quaternion: ");
+  Serial.print(q0_1, 6); Serial.print(", ");
+  Serial.print(q1_1, 6); Serial.print(", ");
+  Serial.print(q2_1, 6); Serial.print(", ");
+  Serial.println(q3_1, 6);
+
+  Serial.print("Sensor 2 Quaternion: ");
+  Serial.print(q0_2, 6); Serial.print(", ");
+  Serial.print(q1_2, 6); Serial.print(", ");
+  Serial.print(q2_2, 6); Serial.print(", ");
   Serial.println(q3_2, 6);
-  
-  delay(int(deltaT * 1000)); // Maintain sample frequency
+
+  delay(10); // Maintain ~100Hz sampling rate
 }
 
-void initMPU9250(int address) {
+void initializeMPU9250(uint8_t address) {
   Wire.beginTransmission(address);
-  Wire.write(0x6B);  // Power management register
-  Wire.write(0);     // Wake up the sensor
+  Wire.write(PWR_MGMT_1);
+  Wire.write(0x00); // Wake up the sensor
   Wire.endTransmission();
-  
-  // Configure gyroscope range (±250 deg/s)
-  Wire.beginTransmission(address);
-  Wire.write(0x1B);
-  Wire.write(0x00);
-  Wire.endTransmission();
-  
-  // Configure accelerometer range (±2g)
-  Wire.beginTransmission(address);
-  Wire.write(0x1C);
-  Wire.write(0x00);
-  Wire.endTransmission();
+  delay(100);
 }
 
-void readSensorData(int address, int16_t &accelX, int16_t &accelY, int16_t &accelZ, 
-                    int16_t &gyroX, int16_t &gyroY, int16_t &gyroZ) {
-  // Request accelerometer data
-  Wire.beginTransmission(address);
-  Wire.write(0x3B);
-  Wire.endTransmission(false);
-  Wire.requestFrom(address, 6);
-  
-  if (Wire.available() == 6) {
-    accelX = Wire.read() << 8 | Wire.read();
-    accelY = Wire.read() << 8 | Wire.read();
-    accelZ = Wire.read() << 8 | Wire.read();
+void calibrateMPU9250(uint8_t address, float &accelOffsetX, float &accelOffsetY, float &accelOffsetZ,
+                      float &gyroOffsetX, float &gyroOffsetY, float &gyroOffsetZ) {
+  const int numSamples = 500;
+  int32_t accelX = 0, accelY = 0, accelZ = 0;
+  int32_t gyroX = 0, gyroY = 0, gyroZ = 0;
+
+  for (int i = 0; i < numSamples; i++) {
+    int16_t ax, ay, az, gx, gy, gz;
+    readMPU9250(address, ax, ay, az, gx, gy, gz);
+    accelX += ax; accelY += ay; accelZ += az;
+    gyroX += gx; gyroY += gy; gyroZ += gz;
+    delay(2);
   }
-  
-  // Request gyroscope data
-  Wire.beginTransmission(address);
-  Wire.write(0x43);
-  Wire.endTransmission(false);
-  Wire.requestFrom(address, 6);
-  
-  if (Wire.available() == 6) {
-    gyroX = Wire.read() << 8 | Wire.read();
-    gyroY = Wire.read() << 8 | Wire.read();
-    gyroZ = Wire.read() << 8 | Wire.read();
-  }
+
+  accelOffsetX = (float)accelX / numSamples * ACCEL_SCALE;
+  accelOffsetY = (float)accelY / numSamples * ACCEL_SCALE;
+  accelOffsetZ = (float)accelZ / numSamples * ACCEL_SCALE;
+  gyroOffsetX = (float)gyroX / numSamples * GYRO_SCALE;
+  gyroOffsetY = (float)gyroY / numSamples * GYRO_SCALE;
+  gyroOffsetZ = (float)gyroZ / numSamples * GYRO_SCALE;
 }
+
+void readMPU9250(uint8_t address, int16_t &accelX, int16_t &accelY, int16_t &accelZ,
+                 int16_t &gyroX, int16_t &gyroY, int16_t &gyroZ) {
+    Wire.beginTransmission(address);
+    Wire.write(ACCEL_XOUT_H);
+    Wire.endTransmission(false);
+
+    Wire.requestFrom((uint8_t)address, (uint8_t)14, true); // Explicit casting fixes ambiguity
+    if (Wire.available() == 14) {
+        accelX = (Wire.read() << 8) | Wire.read();
+        accelY = (Wire.read() << 8) | Wire.read();
+        accelZ = (Wire.read() << 8) | Wire.read();
+        Wire.read(); Wire.read(); // Skip temperature data
+        gyroX = (Wire.read() << 8) | Wire.read();
+        gyroY = (Wire.read() << 8) | Wire.read();
+        gyroZ = (Wire.read() << 8) | Wire.read();
+    }
+}
+
 
 void madgwickUpdate(float gx, float gy, float gz, float ax, float ay, float az,
                     float &q0, float &q1, float &q2, float &q3) {
-  float recipNorm;
-  float s0, s1, s2, s3;
-  float qDot1, qDot2, qDot3, qDot4;
-  float _2q0, _2q1, _2q2, _2q3, _4q0, _4q1, _4q2, _8q1, _8q2, q0q0, q1q1, q2q2, q3q3;
+    float _2q0 = 2.0f * q0;
+    float _2q1 = 2.0f * q1;
+    float _2q2 = 2.0f * q2;
+    float _2q3 = 2.0f * q3;
+    float _4q0 = 4.0f * q0;
+    float _4q1 = 4.0f * q1;
+    float _4q2 = 4.0f * q2;
+    float _4q3 = 4.0f * q3;
+    float _8q1 = 8.0f * q1;
+    float _8q2 = 8.0f * q2;
+    float q0q0 = q0 * q0;
+    float q1q1 = q1 * q1;
+    float q2q2 = q2 * q2;
+    float q3q3 = q3 * q3;
 
-  // Convert gyroscope degrees/sec to radians/sec
-  gx *= 0.0174533f;
-  gy *= 0.0174533f;
-  gz *= 0.0174533f;
+    // Normalize accelerometer measurement
+    float norm = sqrt(ax * ax + ay * ay + az * az);
+    if (norm == 0.0f) return; // Avoid division by zero
+    norm = 1.0f / norm;
+    ax *= norm;
+    ay *= norm;
+    az *= norm;
 
-  // Rate of change of quaternion from gyroscope
-  qDot1 = 0.5f * (-q1 * gx - q2 * gy - q3 * gz);
-  qDot2 = 0.5f * (q0 * gx + q2 * gz - q3 * gy);
-  qDot3 = 0.5f * (q0 * gy - q1 * gz + q3 * gx);
-  qDot4 = 0.5f * (q0 * gz + q1 * gy - q2 * gx);
-
-  // Compute feedback only if accelerometer measurement valid
-  if (!((ax == 0.0f) && (ay == 0.0f) && (az == 0.0f))) {
-    // Normalise accelerometer measurement
-    recipNorm = 1.0f / sqrt(ax * ax + ay * ay + az * az);
-    ax *= recipNorm;
-    ay *= recipNorm;
-    az *= recipNorm;
-
-    // Auxiliary variables to avoid repeated arithmetic
-    _2q0 = 2.0f * q0;
-    _2q1 = 2.0f * q1;
-    _2q2 = 2.0f * q2;
-    _2q3 = 2.0f * q3;
-    _4q0 = 4.0f * q0;
-    _4q1 = 4.0f * q1;
-    _4q2 = 4.0f * q2;
-    _8q1 = 8.0f * q1;
-    _8q2 = 8.0f * q2;
-    q0q0 = q0 * q0;
-    q1q1 = q1 * q1;
-    q2q2 = q2 * q2;
-    q3q3 = q3 * q3;
-
-    // Gradient decent algorithm corrective step
+    // Auxiliary variables for gradient descent algorithm
+    float s0, s1, s2, s3;
     s0 = _4q0 * q2q2 + _2q2 * ax + _4q0 * q1q1 - _2q1 * ay;
-    s1 = _4q1 * q3q3 - _2q3 * ax + 4.0f * q0q0 * q1 - _2q0 * ay - _4q1 + _8q1 * q1q1 + _8q1 * q2q2 + _4q1 * az;
-    s2 = 4.0f * q0q0 * q2 + _2q0 * ax + _4q2 * q3q3 - _2q3 * ay - _4q2 + _8q2 * q1q1 + _8q2 * q2q2 + _4q2 * az;
+    s1 = _4q1 * q3q3 - _2q3 * ax + 4.0f * q0q0 * q1 - _2q0 * ay - _4q1 + _8q1 * q1q1 + _8q1 * q2q2;
+    s2 = 4.0f * q0q0 * q2 + _2q0 * ax + _4q2 * q3q3 - _2q3 * ay - _4q2 + _8q2 * q1q1 + _8q2 * q2q2;
     s3 = 4.0f * q1q1 * q3 - _2q1 * ax + 4.0f * q2q2 * q3 - _2q2 * ay;
 
-    // Normalise step magnitude
-    recipNorm = 1.0f / sqrt(s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3);
-    s0 *= recipNorm;
-    s1 *= recipNorm;
-    s2 *= recipNorm;
-    s3 *= recipNorm;
+    norm = sqrt(s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3);
+    norm = 1.0f / norm;
+    s0 *= norm;
+    s1 *= norm;
+    s2 *= norm;
+    s3 *= norm;
 
     // Apply feedback step
-    qDot1 -= beta * s0;
-    qDot2 -= beta * s1;
-    qDot3 -= beta * s2;
-    qDot4 -= beta * s3;
-  }
+    float qDot0 = 0.5f * (-q1 * gx - q2 * gy - q3 * gz) - beta * s0;
+    float qDot1 = 0.5f * (q0 * gx + q2 * gz - q3 * gy) - beta * s1;
+    float qDot2 = 0.5f * (q0 * gy - q1 * gz + q3 * gx) - beta * s2;
+    float qDot3 = 0.5f * (q0 * gz + q1 * gy - q2 * gx) - beta * s3;
 
-  // Integrate rate of change of quaternion to yield quaternion
-  q0 += qDot1 * deltaT;
-  q1 += qDot2 * deltaT;
-  q2 += qDot3 * deltaT;
-  q3 += qDot4 * deltaT;
+    // Integrate rate of change to yield quaternion
+    q0 += qDot0 * (1.0f / sampleFreq);
+    q1 += qDot1 * (1.0f / sampleFreq);
+    q2 += qDot2 * (1.0f / sampleFreq);
+    q3 += qDot3 * (1.0f / sampleFreq);
 
-  // Normalise quaternion
-  recipNorm = 1.0f / sqrt(q0 * q0 + q1 * q1 + q2 * q2 + q3 * q3);
-  q0 *= recipNorm;
-  q1 *= recipNorm;
-  q2 *= recipNorm;
-  q3 *= recipNorm;
+    // Normalize quaternion
+    norm = sqrt(q0 * q0 + q1 * q1 + q2 * q2 + q3 * q3);
+    norm = 1.0f / norm;
+    q0 *= norm;
+    q1 *= norm;
+    q2 *= norm;
+    q3 *= norm;
 }
