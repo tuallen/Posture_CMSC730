@@ -2,6 +2,9 @@
 #include <Wire.h>
 #include <math.h>
 
+// Stretch Sensor Pins
+const int stretchPin = 39;
+
 // MPU9250 I2C Addresses
 const int MPU9250_ADDRESS_1 = 0x68; // Sensor 1 (AD0 = GND)
 const int MPU9250_ADDRESS_2 = 0x69; // Sensor 2 (AD0 = VCC)
@@ -66,6 +69,9 @@ void setup() {
   calibrateMPU9250(MPU9250_ADDRESS_2, accelOffsetX_2, accelOffsetY_2, accelOffsetZ_2,
                    gyroOffsetX_2, gyroOffsetY_2, gyroOffsetZ_2);
   Serial.println("Calibration complete!");
+  
+  // Initialize stretch sensor
+  pinMode(stretchPin, INPUT);
 }
 
 void loop() {
@@ -106,6 +112,10 @@ void loop() {
   Serial.print(q1_2, 6); Serial.print(", ");
   Serial.print(q2_2, 6); Serial.print(", ");
   Serial.println(q3_2, 6);
+
+  // Print stretch sensor data
+  int stretchValue = analogRead(stretchPin);
+  Serial.printf("Stretch: %d\n", stretchValue);
 
   delay(10); // Maintain ~100Hz sampling rate
 }
