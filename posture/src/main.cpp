@@ -1,6 +1,11 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <math.h>
+#include <ESP32Servo.h>
+
+// Desktop Guy Pins & Servo
+int servoPin = 13;
+Servo myServo;
 
 // Stretch Sensor Pins
 const int stretchPin = 39;
@@ -72,6 +77,10 @@ void setup() {
   
   // Initialize stretch sensor
   pinMode(stretchPin, INPUT);
+
+  // Initialize Desktop Servo Motor
+  pinMode(servoPin, OUTPUT);
+  myServo.attach(servoPin, 500, 2600);
 }
 
 void loop() {
@@ -118,6 +127,8 @@ void loop() {
   Serial.printf("Stretch: %d\n", stretchValue);
 
   delay(10); // Maintain ~100Hz sampling rate
+
+  myServo.write(map(0, 1, 90, 1, 120)); //  REPLACE 0 WITH ANGLE
 }
 
 void initializeMPU9250(uint8_t address) {
