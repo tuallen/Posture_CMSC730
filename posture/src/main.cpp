@@ -105,7 +105,7 @@ void setup() {
   
   // Initialize stretch sensor
   pinMode(stretchPin, INPUT);
-  pinMode(relayPin, INPUT);
+  pinMode(relayPin, OUTPUT);
 
   // Initialize Desktop Servo Motor
   pinMode(servoPin, OUTPUT);
@@ -176,13 +176,13 @@ void loop() {
   Serial.println(angleX);
   myServo.write(map(angleX < 0 ? 0 : angleX, 0, 15, 1, 120));
 
-  // if (stretchCount > 20) {
-  //   Serial.println("Stretch detected!");
-  //   digitalWrite(relayPin, HIGH);
-  //   delay(1000);
-  //   digitalWrite(relayPin, LOW);
-  //   stretchCount = 0;
-  // }
+  if (stretchCount > 20) {
+    Serial.println("Stretch detected!");
+    digitalWrite(relayPin, HIGH);
+    delay(1000);
+    digitalWrite(relayPin, LOW);
+    stretchCount = 0;
+  }
 }
 
 void initializeMPU9250(uint8_t address) {
