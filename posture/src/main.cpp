@@ -11,7 +11,7 @@ Servo myServo;
 const int stretchPin = 39;
 const int relayPin = 19;
 int stretchCount = 0;
-const int stretchThreshold = 1700;
+const int stretchThreshold = 1755;
 float x1 = 0, x2 = 0, y1m = 0, y2 = 0, z1 = 0, z2 = 0;
 void updateEulerAngles(float w, float x, float y, float z, float &xrot, float &yrot, float &zrot);
 
@@ -82,6 +82,7 @@ void setup() {
   
   // Initialize stretch sensor
   pinMode(stretchPin, INPUT);
+  pinMode(relayPin, INPUT);
 
   // Initialize Desktop Servo Motor
   pinMode(servoPin, OUTPUT);
@@ -142,13 +143,21 @@ void loop() {
     stretchCount -= 1;
   }
 
-  // Serial.printf("Stretch: %d Stretch count: %d\n", stretchValue, stretchCount);
+  Serial.printf("Stretch: %d Stretch count: %d\n", stretchValue, stretchCount);
 
   delay(10); // Maintain ~100Hz sampling rate
   float angle = ((gx1 + gx2) / 2) * 3;
-  Serial.printf(" %.2f ", angle);
+  // Serial.printf(" %.2f ", angle);
   // Serial.printf("Angle: %f\n", angle);
   myServo.write(map(long(angle), -90, 90, 1, 120)); //  REPLACE 0 WITH ANGLE
+
+  if (stretchCount > 30) {
+    Serial.println("Stretch detected!");
+    digitalWrite(relayPin, HIGH);
+    delay(1000);
+    digitalWrite(relayPin, LOW);
+    stretchCount = 0;
+  }
 }
 
 void initializeMPU9250(uint8_t address) {
