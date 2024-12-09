@@ -151,7 +151,7 @@ void loop() {
   // Serial.printf("Angle: %f\n", angle);
   myServo.write(map(long(angle), -90, 90, 1, 120)); //  REPLACE 0 WITH ANGLE
 
-  if (stretchCount > 30) {
+  if (stretchCount > 20) {
     Serial.println("Stretch detected!");
     digitalWrite(relayPin, HIGH);
     delay(1000);
