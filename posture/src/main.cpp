@@ -9,6 +9,11 @@ Servo myServo;
 
 // Stretch Sensor Pins
 const int stretchPin = 39;
+const int relayPin = 19;
+int stretchCount = 0;
+const int stretchThreshold = 1700;
+float x1 = 0, x2 = 0, y1m = 0, y2 = 0, z1 = 0, z2 = 0;
+void updateEulerAngles(float w, float x, float y, float z, float &xrot, float &yrot, float &zrot);
 
 // MPU9250 I2C Addresses
 const int MPU9250_ADDRESS_1 = 0x68; // Sensor 1 (AD0 = GND)
@@ -110,25 +115,40 @@ void loop() {
   madgwickUpdate(gx2, gy2, gz2, ax2, ay2, az2, q0_2, q1_2, q2_2, q3_2);
 
   // Print Quaternion Data
-  Serial.print("Sensor 1 Quaternion: ");
-  Serial.print(q0_1, 6); Serial.print(", ");
-  Serial.print(q1_1, 6); Serial.print(", ");
-  Serial.print(q2_1, 6); Serial.print(", ");
-  Serial.println(q3_1, 6);
+  // Serial.print("Sensor 1 Quaternion: ");
+  // Serial.print(q0_1, 6); Serial.print(", ");
+  // Serial.print(q1_1, 6); Serial.print(", ");
+  // Serial.print(q2_1, 6); Serial.print(", ");
+  // Serial.println(q3_1, 6);
 
-  Serial.print("Sensor 2 Quaternion: ");
-  Serial.print(q0_2, 6); Serial.print(", ");
-  Serial.print(q1_2, 6); Serial.print(", ");
-  Serial.print(q2_2, 6); Serial.print(", ");
-  Serial.println(q3_2, 6);
+  // Serial.print("Sensor 2 Quaternion: ");
+  // Serial.print(q0_2, 6); Serial.print(", ");
+  // Serial.print(q1_2, 6); Serial.print(", ");
+  // Serial.print(q2_2, 6); Serial.print(", ");
+  // Serial.println(q3_2, 6);
+
+  // Calculate Euler Angles
+  updateEulerAngles(q0_1, q1_1, q2_1, q3_1, x1, y1m, z1);
+  updateEulerAngles(q0_2, q1_2, q2_2, q3_2, x2, y2, z2);
+
+  // Serial.printf("Sensor 1 Euler Angles X Y Z: %.2f, %.2f, %.2f\n", x1, y1m, z1);
+  // Serial.printf("Sensor 2 Euler Angles X Y Z: %.2f, %.2f, %.2f\n", x2, y2, z2);
 
   // Print stretch sensor data
   int stretchValue = analogRead(stretchPin);
-  Serial.printf("Stretch: %d\n", stretchValue);
+  if (stretchValue < stretchThreshold) {
+    stretchCount += 1;
+  } else if (stretchCount > 0) {
+    stretchCount -= 1;
+  }
+
+  // Serial.printf("Stretch: %d Stretch count: %d\n", stretchValue, stretchCount);
 
   delay(10); // Maintain ~100Hz sampling rate
-
-  myServo.write(map(0, 1, 90, 1, 120)); //  REPLACE 0 WITH ANGLE
+  float angle = ((gx1 + gx2) / 2) * 3;
+  Serial.printf(" %.2f ", angle);
+  // Serial.printf("Angle: %f\n", angle);
+  myServo.write(map(long(angle), -90, 90, 1, 120)); //  REPLACE 0 WITH ANGLE
 }
 
 void initializeMPU9250(uint8_t address) {
@@ -167,7 +187,7 @@ void readMPU9250(uint8_t address, int16_t &accelX, int16_t &accelY, int16_t &acc
     Wire.write(ACCEL_XOUT_H);
     Wire.endTransmission(false);
 
-    Wire.requestFrom((uint8_t)address, (uint8_t)14, true); // Explicit casting fixes ambiguity
+    Wire.requestFrom((int)address, (int)14, 1); // Explicit casting fixes ambiguity
     if (Wire.available() == 14) {
         accelX = (Wire.read() << 8) | Wire.read();
         accelY = (Wire.read() << 8) | Wire.read();
@@ -238,4 +258,11 @@ void madgwickUpdate(float gx, float gy, float gz, float ax, float ay, float az,
     q1 *= norm;
     q2 *= norm;
     q3 *= norm;
+}
+
+
+void updateEulerAngles(float w, float x, float y, float z, float &xrot, float &yrot, float &zrot) {
+  xrot = atan2(2.0f * (w * x + y * z), w * w - x * x - y * y + z * z);
+  yrot = -asin(2.0f * (x * z - w * y));
+  zrot = atan2(2.0f * (x * y + w * z), w * w + x * x - y * y - z * z);
 }

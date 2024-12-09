@@ -1,12 +1,16 @@
 {
-	"folders": [
-		{
-			"path": ".."
-		},
-		{
-			"name": "posture",
-			"path": "."
-		}
-	],
-	"settings": {}
+  "folders": [
+    {
+      "path": ".."
+    },
+    {
+      "name": "posture",
+      "path": "."
+    }
+  ],
+  "settings": {
+    "files.associations": {
+      "cmath": "cpp"
+    }
+  }
 }
