@@ -7,6 +7,29 @@
 int servoPin = 13;
 Servo myServo;
 
+// Testing stuff out
+const int x_gyro_h = 0x43;
+const int x_gyro_l = 0x44;
+const int y_gyro_h = 0x45;
+const int y_gyro_l = 0x46;
+const int z_gyro_h = 0x47;
+const int z_gyro_l = 0x48;
+
+float gyroX_Per_S;
+float gyroY_Per_S;
+float gyroZ_Per_S;
+float angleX = 0;
+float angleY = 0;
+float angleZ = 0;
+float Xcal = 0;
+float Ycal = 0;
+float Zcal = 0;
+long currentTime;
+long previousTime = 0;
+float elapsedTime;
+void anglez();
+float gyro_get_angular_velocity(int gyro_h, int gyro_l, int offset);
+
 // Stretch Sensor Pins
 const int stretchPin = 39;
 const int relayPin = 19;
@@ -146,18 +169,20 @@ void loop() {
   Serial.printf("Stretch: %d Stretch count: %d\n", stretchValue, stretchCount);
 
   delay(10); // Maintain ~100Hz sampling rate
-  float angle = ((gx1 + gx2) / 2) * 3;
+  // float angle = ((gx1 + gx2) / 2) * 3;
   // Serial.printf(" %.2f ", angle);
   // Serial.printf("Angle: %f\n", angle);
-  myServo.write(map(long(angle), -90, 90, 1, 120)); //  REPLACE 0 WITH ANGLE
+  anglez();
+  Serial.println(angleX);
+  myServo.write(map(angleX < 0 ? 0 : angleX, 0, 15, 1, 120));
 
-  if (stretchCount > 20) {
-    Serial.println("Stretch detected!");
-    digitalWrite(relayPin, HIGH);
-    delay(1000);
-    digitalWrite(relayPin, LOW);
-    stretchCount = 0;
-  }
+  // if (stretchCount > 20) {
+  //   Serial.println("Stretch detected!");
+  //   digitalWrite(relayPin, HIGH);
+  //   delay(1000);
+  //   digitalWrite(relayPin, LOW);
+  //   stretchCount = 0;
+  // }
 }
 
 void initializeMPU9250(uint8_t address) {
@@ -274,4 +299,60 @@ void updateEulerAngles(float w, float x, float y, float z, float &xrot, float &y
   xrot = atan2(2.0f * (w * x + y * z), w * w - x * x - y * y + z * z);
   yrot = -asin(2.0f * (x * z - w * y));
   zrot = atan2(2.0f * (x * y + w * z), w * w + x * x - y * y - z * z);
+}
+
+
+// Trying stuff out
+float gyro_get_angular_velocity(int gyro_h, int gyro_l, int offset) {
+  byte g_h = 0;
+  byte g_l = 0;
+  int16_t gyro_raw = 0;
+
+  // Start Read Request
+  Wire.beginTransmission(MPU9250_ADDRESS_1);
+  Wire.write(gyro_h);            // Requesting read from LEFT 8 bits of information
+  Wire.endTransmission();
+  // End Read Request
+
+  // Read the Request
+  Wire.requestFrom(MPU9250_ADDRESS_1, 1);
+  g_h = Wire.read();        // Reads the Byte
+  // End Read Request
+
+  // Start Read Request
+  Wire.beginTransmission(MPU9250_ADDRESS_1);
+  Wire.write(gyro_l);            // Requesting read from RIGHT 8 bits of information
+  Wire.endTransmission();
+  // End Read Request
+
+  // Read the Request
+  Wire.requestFrom(MPU9250_ADDRESS_1, 1);
+  g_l = Wire.read();        // Reads the Byte
+  // End Read Request
+
+  gyro_raw = (g_h << 8) | g_l;
+
+  return (gyro_raw - offset) / 131.0;
+}
+
+void anglez() {
+  currentTime = millis();
+  elapsedTime = (currentTime - previousTime) / 1000.0;
+
+  if (currentTime > 10000) {
+    gyroX_Per_S = gyro_get_angular_velocity(x_gyro_h, x_gyro_l, Xcal);
+    gyroY_Per_S = gyro_get_angular_velocity(y_gyro_h, y_gyro_l, Ycal);
+    gyroZ_Per_S = gyro_get_angular_velocity(z_gyro_h, z_gyro_l, Zcal);
+    angleX = angleX + gyroX_Per_S * elapsedTime;
+    angleY = angleY + gyroY_Per_S * elapsedTime;
+    angleZ = angleZ + gyroZ_Per_S * elapsedTime;
+    previousTime = currentTime;
+  } else {
+    gyroX_Per_S = gyro_get_angular_velocity(x_gyro_h, x_gyro_l, 0);
+    gyroY_Per_S = gyro_get_angular_velocity(y_gyro_h, y_gyro_l, 0);
+    gyroZ_Per_S = gyro_get_angular_velocity(z_gyro_h, z_gyro_l, 0);
+    Xcal = gyroX_Per_S * 131.0;
+    Ycal = gyroY_Per_S * 131.0;
+    Zcal = gyroZ_Per_S * 131.0;
+  }
 }
