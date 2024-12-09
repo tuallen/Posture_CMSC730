@@ -174,7 +174,7 @@ void loop() {
   // Serial.printf("Angle: %f\n", angle);
   anglez();
   Serial.println(angleX);
-  myServo.write(map(angleX < 0 ? 0 : angleX, 0, 15, 1, 120));
+  myServo.write(map(angleX < 0 ? 0 : angleX, 0, 30, 1, 120));
 
   if (stretchCount > 20) {
     Serial.println("Stretch detected!");
