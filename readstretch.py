@@ -7,7 +7,7 @@ import re
 
 s = Serial("/dev/cu.usbserial-0001", 9600)
 
-smooth = 20
+smooth = 1
 k = []
 x = []
 y = []
@@ -31,7 +31,7 @@ while True:
 
         plt.plot(y)
         plt.draw()
-        plt.pause(0.01)
+        plt.pause(0.001)
         plt.clf()
     except Exception as e:
         print(e)
